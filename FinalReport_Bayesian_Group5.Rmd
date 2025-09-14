@@ -1,0 +1,642 @@
+---
+title: "AOL Bayesian Data Analysis"
+author: "Kelompok 5"
+date: "2024-12-17"
+output: html_document
+---
+#Group member
+Angela Valerie Christy || 2702244624
+Calvina Adelia Sucipto || 2702246232
+Cheryl Aurellia Valencia || 2702252872
+Sammer Violetta Liu || 2702244611
+
+#Dataset
+The dataset used is titled ‘heart.csv’ and is available on Kaggle. We chose this dataset because it contains several predictor variables related to cardiovascular disease risk. This dataset consists of 14 columns and 1025 rows of data.
+
+Here is a list of the variables and their explanations in the dataset:
+- age: Age of the patient.
+- sex: Gender (1 = male, 0 = female).
+- cp: Type of chest pain (0-3, 0 = typical angina, 1 = atypical angina, 2 = non-anginal pain, 3 = asymptomatic).
+- trestbps: Resting blood pressure (mmHg).
+- chol: Cholesterol level (mg/dL).
+- fbs: Fasting blood sugar (> 120 mg/dL: 1, others: 0).
+- restecg: Electrocardiographic results (0-2, categories).
+- thalach: Maximum heart rate achieved (bpm).
+- exang: Exercise-induced angina (1 = yes, 0 = no).
+- oldpeak: depression.
+- slope: Slope of the ST segment (0-2, categories).
+- ca: Number of major vessels colored by fluoroscopy (0-3).
+- thal: Thalassemia type (1 = normal, 2 = fixed defect, 3 = reversible defect).
+- target: Heart disease indication (1 = positive, 0 = negative).
+
+```{r}
+set.seed(123)
+library(rjags)
+library(coda)
+library(ggplot2)
+library(loo)
+library(dplyr)
+library(reshape2)
+```
+
+```{r}
+data <- read.csv("heart.csv", header = TRUE)
+
+```
+
+# Data Preprocessing
+the code below is for step in preparing out data for analysis or modeling. 
+```{r}
+#show first few row of the data
+head(data)
+```
+
+```{r}
+#show last few row of the data
+tail(data)
+```
+
+```{r}
+#show statistical data 
+summary(data)
+```
+
+```{r}
+#count the total number of missing values
+sum(is.na(data))
+```
+
+```{r}
+#boxplot for outliers
+ggplot(data, aes(x = "", y = trestbps)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'trestbps'", x = "Variabel", y = "Nilai trestbps") +
+  theme_minimal()
+
+ggplot(data, aes(x = "", y = chol)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'chol'", x = "Variabel", y = "Nilai Chol") +
+  theme_minimal()
+
+ggplot(data, aes(x = "", y = thalach)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'thalach'", x = "Variabel", y = "Nilai thalach") +
+  theme_minimal()
+
+ggplot(data, aes(x = "", y = oldpeak)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'oldpeak'", x = "Variabel", y = "Nilai oldpeak") +
+  theme_minimal()
+
+ggplot(data, aes(x = "", y = ca)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'ca'", x = "Variabel", y = "Nilai ca") +
+  theme_minimal()
+
+ggplot(data, aes(x = "", y = thal)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, fill = "skyblue") +
+  labs(title = "Boxplot untuk Kolom 'thal'", x = "Variabel", y = "Nilai thal") +
+  theme_minimal()
+```
+
+```{r}
+#handling outlier
+outliers_zscore <- function(data, threshold = 3) {
+  outlier_indices <- list()
+  
+  # Iterasi untuk setiap kolom numerik
+  for (col in names(data)) {
+    if (is.numeric(data[[col]])) {
+      z_scores <- scale(data[[col]])
+      outliers <- which(abs(z_scores) > threshold)
+      outlier_indices[[col]] <- outliers
+    }
+  }
+  return(outlier_indices)
+}
+outliers_zscore_result <- outliers_zscore(data)
+print(outliers_zscore_result)
+```
+
+```{r}
+#replace outlier with the median of the column
+replace_outliers <- function(df, threshold = 3) {
+  for (col in names(df)) {
+    if (is.numeric(df[[col]])) {
+      z_scores <- scale(df[[col]])
+      df[[new_col]][abs(z_scores) > threshold] <- median(df[[col]], na.rm = TRUE) 
+    }
+  }
+  return(df)
+}
+```
+
+#EDA 
+Code below is for seeing each correlation on each variable factors with the outcome or target
+```{r}
+#Heatmap for see corelation each variable
+
+cor_matrix <- cor(data[, sapply(data, is.numeric)])
+
+melted_cor <- melt(cor_matrix)
+
+ggplot(data = melted_cor, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "coral", high = "red", mid = "white", midpoint = 0) +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 4) +  
+  theme_minimal() +
+  labs(title = "Heatmap Korelasi Antar Variabel", fill = "Korelasi") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+#show barplot that represent the values of the target of the sex variable.
+ggplot(data, aes(x = factor(sex), fill = factor(target))) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Distribution of Sex vs Target",
+    x = "Sex (0 = Male, 1 = Female)",
+    y = "Count",
+    fill = "Target"
+  ) +
+  theme_minimal() +
+  scale_fill_manual(values = c("skyblue", "salmon"))
+```
+The graph shows the distribution of gender against the target , with the X-axis is representing gender (0 = male and 1 = female) and the Y-axis showing the number of individuals in each category. The colors indicate: blue for Target = 0 (did not reach the target) and red for Target = 1 (reached the target).
+
+In conclusion, this graph is conclude that male are more likely to have heart disease, while females are more likely not to have it.
+
+```{r}
+# show mean of target and group by oldpeak
+data_summary <- data %>%
+  group_by(oldpeak) %>%
+  summarise(mean_value = mean(target))
+
+ggplot(data_summary, aes(x = oldpeak , y = mean_value)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Bar Plot: Rata-rata Nilai Numerikal Berdasarkan Kategori", x = "oldpeak", y = "Rata-rata Nilai target")
+```
+
+```{r}
+#analyze patient with chest pain (cp) and compare it with the outcome (target)
+ggplot(data, aes(x = factor(cp), fill = factor(target))) +
+  geom_bar(position = "stack") +
+  labs(
+    x = "Chest Pain Type",
+    fill = "Target",
+    title = "Stacked Bar Chart of Chest Pain Type by Target"
+  ) +
+  theme_minimal()
+```
+The target variable is divided into two categories : Red (0) for  no heart disease and Blue (1) for a heart disease. Each bar shows the distribution of chest pain types, divided by these target categories.
+The distribution of the target variable varies across chest pain types, suggesting a potential relationship between chest pain type and the condition indicated by the target variable.
+```{r}
+#analyze patient with chest pain (exang) and compare it with the outcome (target)
+ggplot(data, aes(x = factor(exang), fill = factor(target))) +
+  geom_bar(position = "stack") +
+  labs(
+    x = "angina after exercise",
+    fill = "Target",
+    title = "Stacked Bar Chart of Chest Pain Type by Target"
+  ) +
+  theme_minimal()
+```
+The graph shows the distribution of chest pain related to angina after exercise (angina after exercise) against the target (Target). The X-axis represents whether individuals experienced angina after exercise (0 for no angina and 1 for angina), while the Y-axis shows the number of individuals in each category. The colors indicate: blue for Target = 1 (have cardiovascular disease) and red for Target = 0 (did not have cardiovascular disease).
+
+# BAYESIAN LOGISTIC REGRESSION
+
+```{r}
+# create data
+X1 = data$cp   
+X2 = data$oldpeak
+X3 = data$exang
+Y =  data$target
+N = nrow(data)
+```
+
+```{r}
+#create model_string
+model_string <- "
+  model{
+    #Likelihood
+    for(i in 1:N){
+      Y[i] ~ dbern(p[i])
+      logit(p[i]) <- beta0 + beta1 * x1[i] + beta2 * x2[i] + beta3 * x3[i]
+    }
+    
+    #Priors
+    beta0 ~ dnorm(0,tau)
+    beta1 ~ dnorm(0,tau)
+    beta2 ~ dnorm(0,tau)
+    beta3 ~ dnorm(0,tau)
+    
+    tau <- pow(sd_prior, -2)
+  }
+"
+```
+
+```{r}
+#set the data
+data_list <- list(
+  N = N,
+  x1 = X1,
+  x2 = X2,
+  x3 = X3,
+  Y = Y
+)
+
+#set priors
+priors <- list(
+  normal = list(sd_prior = 5) #weakly informative prior
+)
+```
+
+```{r}
+#combine the data_list with the normal prior for the standard deviation
+data_normal = c(data_list, list(sd_prior = priors$normal$sd_prior))
+
+#create model
+model_normal <- jags.model(
+  textConnection(model_string),
+  data = data_normal,
+  n.chains = 5,
+  quiet = T
+)
+```
+
+```{r}
+#burn in
+update(model_normal, 1e3, progress.bar = "none")
+```
+
+```{r}
+#sampling the model
+samples_normal <- coda.samples(
+  model = model_normal,
+  variable.names = c("beta0", "beta1", "beta2", "beta3"),
+  n.iter= 1e4, # 10000 iterations
+  progress.bar = "none"
+)
+```
+
+```{r}
+#show the summary of the model
+summary(samples_normal)
+```
+The results show that the model's parameters have different level of uncertainty. For β0, the average value is 0.5912 with a standard deviation of 0.12641. For β1, which relates to the variable cp, the average is 0.8103 with a standard deviation of 0.08341,. β2, which uses the oldpeak variable, has an average of -0.9333 and a standard deviation of 0.08811. Lastly, β3, which uses the exang variable, has an average of -1.2433 with a standard deviation of 0.18110
+```{r}
+#posterior mean of beta1
+mean(samples_normal[[1]][, "beta1"])
+
+#posterior median of beta1
+median(samples_normal[[1]][, "beta1"])
+  
+#posterior mean of beta2
+mean(samples_normal[[1]][, "beta2"])
+
+#posterior median of beta2
+median(samples_normal[[1]][, "beta2"])
+
+#posterior mean of beta3
+mean(samples_normal[[1]][, "beta3"])
+
+#posterior median of beta3
+median(samples_normal[[1]][, "beta3"])
+```
+
+
+# CONVERGENCE PLOT
+```{r}
+par(mar=c(4,4,2,2))
+plot(samples_normal)
+```
+
+```{r}
+#checking autocorrelation
+autocorr.plot(samples_normal)
+```
+The autocorrelation plots for parameters β0, β1, β2, and β3 show that the relationship between samples drops as the number of lags increases. At first, the correlation is fairly strong, but it quickly weakens and approaches zero after just a few lags. This pattern is consistent across all the parameters.
+
+# convergence testing (GEWEKE)
+```{r}
+# Geweke Diagnostic for convergence
+set.seed(123)
+geweke_result <- geweke.diag(samples_normal)
+print(geweke_result)
+```
+The Geweke diagnostic results shows that the convergence of each chain is variate. Chain 4 shows signs of full convergence, with all parameters close to zero. However, chains 1, 2, 3, and 5 have some parameters that not fully converged. For example, β2 in chain 1 is -1.0808, β2 in chain 2 is 1.4938, β0 in chain 3 is 1.5060, and β1 in chain 5 is -1.4729.  Some parameters show signs of convergence and others still need further analysist
+
+# convergence testing (GELMAN-RUBIN)
+```{r}
+# Gelman-Rubin Diagnostic for Convergence
+gelman_result <- gelman.diag(samples_normal)
+print(gelman_result)
+```
+The Gelman-Rubin diagnostic results show the model has converged for all parameters. This suggests that the posterior results are trustworthy, even though the Geweke diagnostic in the previous calculation indicated some possible partial convergence in a few chains.
+
+# Posterior Predictive check
+
+```{r}
+#conversion of samples_normal become matrix
+D <- t(apply(as.matrix(samples_normal), 1, function(x) c(min(x), max(x), max(x) - min(x))))
+
+# calculate statistical raw data
+D0 <- c(min(Y), max(Y), max(Y) - min(Y))
+Dnames <- c("Min Y", "Max Y", "Range Y")
+
+# p-value initialization
+pval <- rep(0, 3)
+names(pval) <- Dnames
+
+# Loop for making plot dan count p-value
+for(j in 1:3){
+  plot(density(D[,j]), xlim=range(c(D0[j], D[,j])), xlab="D", ylab="Posterior probability", main=Dnames[j])
+  abline(v=D0[j], col=2)
+  legend("topleft", c("Model", "Data"), lty=1, col=1:2, bty="n")
+  pval[j] <- mean(D[,j] > D0[j])
+}
+
+# Output p-value
+pval
+
+```
+Posterior Predictive Check (PPC) results is for comparing the model posterior distribution (black line) with the actual data (red vertical line) for three statistics: Min Y, Max Y, and Range Y. In the Min Y graph, the actual data is around 0, while the model's posterior distribution is between -1.5 and -0.5, showing a difference for the minimum value. In the Max Y graph, the actual data is around 1.0, and the model's posterior distribution is mostly around 0.8, with the peak close to the actual value. For the Range Y graph, the actual data value is around 2.5, while the model's posterior distribution is centered around 2.0, with the peak near this value.
+
+# MODEL COMPARISON
+
+## BAYES FACTOR
+```{r}
+model_string_null <- "
+  model{
+    # Likelihood
+    for(i in 1:N){
+      Y[i] ~ dbern(p[i])
+      logit(p[i]) <- beta0
+    }
+    
+    # Priors
+    beta0 ~ dnorm(0, tau)
+    tau <- pow(sd_prior, -2)
+  }
+"
+
+# Set the data
+data_list_null <- list(
+  N = nrow(data), 
+  Y = Y           
+)
+
+# Set priors
+priors <- list(
+  normal = list(sd_prior = 5) # Weakly informative prior
+)
+
+data_normal_null <- c(data_list_null, list(sd_prior = priors$normal$sd_prior))
+
+# Create the JAGS model
+model_null <- jags.model(
+  textConnection(model_string_null),
+  data = data_normal_null,
+  n.chains = 5,
+  quiet = TRUE
+)
+
+# Burn-in
+update(model_null, 1e3, progress.bar = "none")
+
+# Sampling
+samples_null <- coda.samples(
+  model = model_null,
+  variable.names = c("beta0"),
+  n.iter = 1e4, # 10000 iterations
+  progress.bar = "none"
+)
+
+# Summary of the null model
+summary(samples_null)
+
+```
+
+```{r}
+# Extract samples from the full model
+full_model_samples <- as.matrix(samples_normal)
+
+# Define a function to calculate the log likelihood for each sample
+log_likelihood_full <- function(params, data) {
+  # Unpack parameters
+  beta0 <- params[1]
+  beta1 <- params[2]
+  beta2 <- params[3]
+  beta3 <- params[4]
+  
+  # Calculate the logit(p) for each observation in the data
+  logit_p <- beta0 + beta1 * data$x1 + beta2 * data$x2 + beta3 * data$x3
+  p <- 1 / (1 + exp(-logit_p))  # inverse logit
+  
+  # Calculate the likelihood for Bernoulli data
+  log_likelihood <- sum(data$Y * log(p) + (1 - data$Y) * log(1 - p))
+  return(log_likelihood)
+}
+
+# Calculate log likelihood for the full model
+log_likelihood_values_full <- apply(full_model_samples, 1, log_likelihood_full, data = data_list)
+
+# Estimate the marginal likelihood (log-evidence) using harmonic mean
+log_marginal_likelihood_full <- -mean(1 / log_likelihood_values_full)
+```
+
+
+```{r}
+# Extract samples from the null model
+null_model_samples <- as.matrix(samples_null)
+
+# Define a function to calculate the log likelihood for the null model
+log_likelihood_null <- function(params, data) {
+  # Unpack parameter
+  beta0 <- params[1]
+  
+  # Calculate the logit(p) for each observation in the data (no predictors)
+  logit_p <- beta0
+  p <- 1 / (1 + exp(-logit_p))  # inverse logit
+  
+  # Calculate the likelihood for Bernoulli data
+  log_likelihood <- sum(data$Y * log(p) + (1 - data$Y) * log(1 - p))
+  return(log_likelihood)
+}
+
+# Calculate log likelihood for the null model
+log_likelihood_values_null <- apply(null_model_samples, 1, log_likelihood_null, data = data_list)
+
+# Estimate the marginal likelihood (log-evidence) for the null model
+log_marginal_likelihood_null <- -mean(1 / log_likelihood_values_null)
+
+```
+
+```{r}
+# Calculate the Bayes Factor
+bf <- exp(log_marginal_likelihood_full - log_marginal_likelihood_null)
+print(bf)
+```
+The results show that the average value of the parameters is 0.0538 with a standard deviation of 0.0617. The naive standard error is 0.0003, and the time-series standard error is 0.0003. The quantiles are as follows: the 2.5% percentile is -0.0690, the 25% percentile is 0.0117, the median is 0.0530, the 75% percentile is 0.0950, and the 97.5% percentile is 0.1744. The Bayes factor is 1.00064 indicates that the data supports both the full and null models equally, with no significant difference.
+
+## DIC
+```{r}
+model_string_binomial <- "
+  model{
+    #Likelihood
+    for(i in 1:N){
+      Y[i] ~ dbin(p[i], n[i])  # Menggunakan distribusi binomial dengan percobaan n[i]
+      logit(p[i]) <- beta0 + beta1 * x1[i] + beta2 * x2[i] + beta3 * x3[i]
+    }
+    
+    #Priors
+    beta0 ~ dnorm(0,tau)
+    beta1 ~ dnorm(0,tau)
+    beta2 ~ dnorm(0,tau)
+    beta3 ~ dnorm(0,tau)
+    
+    tau <- pow(sd_prior, -2)
+  }
+"
+
+# Assume n[i] is known or set to 1 for now
+data_binomial <- c(data_list, list(sd_prior = priors$normal$sd_prior, n = rep(1, N)))
+
+# Create the Binomial model
+model_binomial <- jags.model(
+  textConnection(model_string_binomial),
+  data = data_binomial,
+  n.chains = 5,
+  quiet = TRUE
+)
+
+# Burn-in
+update(model_binomial, 1e3, progress.bar = "none")
+
+# Sampling
+samples_binomial <- coda.samples(
+  model = model_binomial,
+  variable.names = c("beta0", "beta1", "beta2", "beta3"),
+  n.iter = 1e4,
+  progress.bar = "none"
+)
+
+```
+
+```{r}
+dic_logistic <- dic.samples(model_normal, 
+                            n.iter = 1e4, 
+                            progress.bar = "none")
+# Calculate DIC for the Binomial model
+dic_binomial <- dic.samples(model_binomial, 
+                            n.iter = 1e4, 
+                            progress.bar = "none")
+
+```
+
+```{r}
+# Menghitung rata-rata deviance untuk model logistik
+mean_DIC_logistic <- mean(dic_logistic$deviance)
+
+# Menghitung rata-rata deviance untuk model binomial
+mean_DIC_binomial <- mean(dic_binomial$deviance)
+
+# Menampilkan rata-rata DIC untuk kedua model
+cat("Rata-rata DIC untuk Model Logistik:", mean_DIC_logistic, "\n")
+cat("Rata-rata DIC untuk Model Binomial:", mean_DIC_binomial, "\n")
+```
+The average DIC for the logistic model is 0.953033, while the average DIC for the binomial model is 0.9530761. This means both models fit the data equally well. We can see the difference is very small, both models are similar in terms of complexity and fit.
+
+# WAIC
+```{r}
+mod <- textConnection("model{
+  for(i in 1:N){
+    Y[i] ~ dbern(p[i])
+    logit(p[i]) <- beta[1] + x1[i]*beta[2] + x2[i]*beta[3] + x3[i]*beta[4]
+    
+    #WAIC computation
+    like[i] <- Y[i] * log(p[i]) + (1 - Y[i]) * log(1 - p[i])
+  }
+  
+  # Priors
+  for(j in 1:4) {
+    beta[j] ~ dnorm(0, 0.01) # Prior untuk beta
+  }
+}")
+
+data <- list(
+  Y = Y,
+  x1 = X1,
+  x2 = X2,
+  x3 = X3,
+  N = N
+)
+
+# Model fitting
+model <- jags.model(
+  mod,
+  data = data,
+  n.chains = 5,
+  quiet = TRUE
+)
+
+# Burn-in
+update(model, 1000, progress.bar = "none")
+
+# Sampling
+samps <- coda.samples(
+  model,
+  variable.names = c("beta", "like"),
+  n.iter = 10000,
+  n.thin = 5
+)
+
+# WAIC computation
+p <- 4 # Jumlah parameter beta (intercept + 3 prediktor)
+samps_beta <- samps[, 1:p]
+samps_like <- samps[, (p + 1):(N + p)]
+like <- do.call(rbind, lapply(samps_like, as.matrix))
+
+# Hitung WAIC
+fbar <- colMeans(exp(like)) # Mean likelihood
+Pw <- sum(apply(like, 2, var)) # Penalti deviasi rata-rata
+WAIC <- -2 * sum(log(fbar)) + 2 * Pw
+```
+
+```{r}
+# Output hasil
+cat("WAIC:", WAIC, "\n")
+summary(samps_beta)
+
+par(mar=c(2,2,2,2))
+plot(samps_beta)
+```
+
+
+```{r}
+# Extract posterior predictive samples
+samps_like <- samples_normal[, "beta0"]  # Replace "beta0" with your likelihood samples
+
+# Convert to matrix if necessary
+if (!is.matrix(samps_like)) {
+  samps_like <- as.matrix(samps_like)
+}
+
+# Compute WAIC components
+fbar <- colMeans(samps_like)  # Mean of likelihood samples
+Pw <- sum(apply(log(samps_like), 2, var))  # Penalized variance component
+
+# Compute WAIC
+WAIC <- -2 * sum(log(fbar)) + 2 * Pw
+
+# Print WAIC value
+cat("WAIC Value:", WAIC, "\n")
+
+```
+
+The WAIC value is 981.0214 shows that this model is good for comparing its performance with other models using the same data. The average estimates for all parameters are consistent, with low variability. The 95% confidence intervals for each parameter do not include zero, meaning all parameters are statistically significant. The positive coefficients for β1 and β2 suggest a positive relationship with the response variable, while the negative coefficients for β3 and β4 indicate a negative relationship. Overall, these results show that all parameters have an important role in the model.
+
+#Conclusion
+
+This study aims to predict heart disease using patient data with logistic regression. The dataset contains 1,025 rows and 14 columns. Logistic regression was chosen because it works well with binary outcomes. The results show that the model's parameters significantly affect the probability of heart disease. β1 (cp) has a strong positive relationship with the probability, while β2 (oldpeak) and β3 (exang) have negative relationships. The trace, density, and autocorrelation plots show good model convergence and efficient sampling. Diagnostics like Geweke and Gelman-Rubin support convergence. The Posterior Predictive Check shows a narrow prediction range with low probabilities. Model comparison indicates similar performance between the full and null models. Overall, we conclude that heart disease can be predicted using the variables exang, oldpeak, and cp.
+
